@@ -1,0 +1,220 @@
+\RequirePackage{expl3, l3keys2e, xparse}
+
+\ExplSyntaxOn
+
+% We save our information in a ``property list'', which is L3's
+% version of an associative array or dictionary.  They keys will give
+% the ability to store several groups of nodes and restore them at
+% will.
+\prop_new:N \g__sn_prop
+% We'll need a token list for constructing the saved data.
+\tl_new:N \l__sn_tmpa_tl
+% And one for constructing the save file command
+\tl_new:N \l__sn_tmpb_tl
+% A token list for adding or subtracting
+\tl_new:N \l__sn_op_tl
+% Testing a minus sign
+\tl_new:N \l__sn_minus_tl
+\tl_set:Nn \l__sn_minus_tl {-}
+% Enable prefixes for restored nodes
+\tl_new:N \l__sn_prefix_tl
+\tl_set:Nn\l__sn_prefix_tl {}
+
+\seq_new:N \l__sn_shifts_seq
+
+%
+\file_if_exist:nT {\jobname.nodes}
+{
+  \file_input:n {\jobname.nodes}
+}
+
+\iow_new:N \g__sn_stream
+\iow_open:Nn \g__sn_stream {\jobname.nodes}
+
+\AtEndDocument
+{
+  \ExplSyntaxOn
+  \iow_close:N \g__sn_stream
+  \ExplSyntaxOff
+}
+
+% This is the command that actually does the work.  It constructs a
+% token list which contains the code that will restore the node data
+% when invoked.  The two arguments are the name of this group (for
+% reference later) and a comma separated list of the node names to be
+% saved.
+\cs_new_nopar:Npn \save_nodes:nn #1#2
+{
+  % Clear our token lists
+  \tl_clear:N \l__sn_tmpa_tl
+  % Iterate over the list of node names
+  \clist_map_inline:nn {#2}
+  {
+    % Test to see if the node has been defined
+    \tl_if_exist:cT {pgf@sh@ns@##1}
+    {
+      % The node information is stored in a series of macros of the form
+      % \pgf@sh@XX@nodename where XX is one of the following.
+      \clist_map_inline:nn {ns,np,ma,nt,pi}
+      {
+        % Our token list will look like:
+        %
+        % \tl_set:cn {pgf@sh@XX@nodename} {<current contents of that macro>}
+        %
+        % This will restore \pgf@sh@XX@nodename to its current value
+        % when this list is invoked.
+        %
+        % This part puts the \tl_set:cn {pgf@sh@XX@nodename} in place
+        \tl_put_right:Nn \l__sn_tmpa_tl
+        {
+          \tl_set:cn {pgf@sh@####1@\l__sn_prefix_tl ##1}
+        }
+        % Now we put the current contents in place.  We're doing this in
+        % an expansive context to get at the contents.  The \exp_not:v
+        % part takes the current value of \pgf@sh@XX@nodename and puts
+        % it in place, preventing further expansion.
+        \tl_if_exist:cTF {pgf@sh@####1@##1}
+        {
+          \tl_put_right:Nx \l__sn_tmpa_tl {{\exp_not:v {pgf@sh@####1@\l__sn_prefix_tl ##1}}}
+        }
+        {
+          \tl_put_right:Nx \l__sn_tmpa_tl {{}}
+        }
+      }
+    }
+  }
+  % Once we've assembled our token list, we store it in the property
+  % list using the key we were given.
+  \prop_gput:NnV \g__sn_prop {#1} \l__sn_tmpa_tl
+}
+
+\cs_new_nopar:Npn \restore_nodes:n #1
+{
+  % Restoring nodes is simple: look in the property list for the key
+  % and if it exists, invoke the macro stored there.
+  \prop_get:NnNT \g__sn_prop {#1} \l__sn_tmpa_tl
+  {
+    \tl_use:N \l__sn_tmpa_tl
+  }
+}
+
+\cs_new_nopar:Npn \save_nodes_to_file:n #1
+{
+  % Save the token list to the aux file so that on reading the aux
+  % file, we restore it to the prop
+  \prop_get:NnNT \g__sn_prop {#1} \l__sn_tmpa_tl
+  {
+    \tl_clear:N \l__sn_tmpb_tl
+    \tl_set:Nn \l__sn_tmpb_tl
+    {
+      \prop_gput:Nnn \g__sn_prop {#1}
+    }
+    \tl_put_right:Nx \l__sn_tmpb_tl {{\exp_not:V \l__sn_tmpa_tl}}
+    \iow_now:Nx \g__sn_stream
+    {
+      \iow_newline:
+      \exp_not:V \l__sn_tmpb_tl
+      \iow_newline:
+    }
+  }
+}
+
+% These two are wrappers around our internal commands.
+%
+% The first argument is the label for our group of nodes (so that we
+% can refer to them later) and the second argument is a comma
+% separated list of nodes to save.
+\DeclareDocumentCommand \SaveNodes {m m}
+{
+  \save_nodes:nn {#1}{#2}
+}
+
+% The argument to this is the label for our group of nodes to restore.
+\DeclareDocumentCommand \RestoreNodes {o m}
+{
+  \seq_clear:N \l__sn_shifts_seq
+  \IfNoValueF {#1} {
+    \keys_set:nn {save nodes} {#1}
+  }
+  \restore_nodes:n {#2}
+}
+
+\DeclareDocumentCommand \LoadNodesFrom {m}
+{
+  \file_if_exist:nT {#1.nodes}
+  {
+    \ExplSyntaxOn
+    \file_input:n {#1.nodes}
+    \ExplSyntaxOff
+  }
+}
+
+\DeclareDocumentCommand \BakeBoundingBoxAs {m}
+{
+  \tl_set:cn {pgf@sh@ns@#1}{rectangle}
+  \tl_set:cx {pgf@sh@np@#1}{\def \exp_not:N \northeast {\exp_not:N \pgfqpoint{ \dim_use:N \pgf@picmaxx} {\dim_use:N \pgf@picmaxy}} \def \exp_not:N \southwest {\exp_not:N \pgfqpoint {\dim_use:N \pgf@picminx} {\dim_use:N \pgf@picminy}}}
+  \tl_set:cn {pgf@sh@ma@#1}{}
+  \tl_set:cn {pgf@sh@nt@#1}{{1}{0}{0}{1}{0pt}{0pt}}
+  \tl_set:cx {pgf@sh@pi@#1}{\tl_use:N \pgfpictureid}
+}
+
+\makeatletter
+\cs_new_nopar:Npn \tikz_scan_point:n #1
+{
+  \tikz@scan@one@point\pgfutil@firstofone#1\relax
+}
+
+\cs_generate_variant:Nn \tikz_scan_point:n {V}
+
+\cs_new_nopar:Npn \shift_node:nn #1#2
+{
+  \tl_set:Nx \l__sn_tmpa_tl {\tl_head:N {#2}}
+  
+  \tl_if_eq:NNTF \l__sn_tmpa_tl \l__sn_minus_tl {
+    \tl_set:Nx \l__sn_tmpb_tl {\tl_tail:n {#2}}
+  }
+  {
+    \tl_set:Nn \l__sn_tmpb_tl {#2}
+  }
+  
+  \tikz_scan_point:V \l__sn_tmpb_tl
+
+  \tl_if_eq:NNT \l__sn_tmpa_tl \l__sn_minus_tl {
+    \dim_set:Nn \pgf@x {-\pgf@x}
+    \dim_set:Nn \pgf@y {-\pgf@y}
+  }
+  
+  \tl_set:cx {pgf@sh@nt@#1}
+  {
+    {\tl_item:cn {pgf@sh@nt@#1} {1}}
+    {\tl_item:cn {pgf@sh@nt@#1} {2}}
+    {\tl_item:cn {pgf@sh@nt@#1} {3}}
+    {\tl_item:cn {pgf@sh@nt@#1} {4}}
+    {\dim_eval:n {\tl_item:cn {pgf@sh@nt@#1} {5} + \pgf@x}}
+    {\dim_eval:n {\tl_item:cn {pgf@sh@nt@#1} {6} + \pgf@y}}
+  }
+}
+\makeatother
+
+\DeclareDocumentCommand \ShiftNode {m m}
+{
+  \clist_map_inline:nn {#2}
+  {
+    \shift_node:nn {#1}{##1}
+  }
+}
+
+
+\DeclareDocumentCommand \SaveNodesToFile {m m}
+{
+  \save_nodes:nn {#1}{#2}
+  \save_nodes_to_file:n {#1}
+}
+
+\keys_define:nn {save nodes}
+{
+  prefix .tl_set:N  = \l__sn_prefix_tl,
+  prefix .initial:n = {},
+}
+
+\ExplSyntaxOff
