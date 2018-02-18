@@ -11,23 +11,21 @@
 \tl_new:N \l__sn_tmpa_tl
 % And one for constructing the save file command
 \tl_new:N \l__sn_tmpb_tl
-% A token list for adding or subtracting
-\tl_new:N \l__sn_op_tl
-% Testing a minus sign
+% Testing a minus sign for shifting a node
 \tl_new:N \l__sn_minus_tl
 \tl_set:Nn \l__sn_minus_tl {-}
-% Enable prefixes for restored nodes
-\tl_new:N \l__sn_prefix_tl
-\tl_set:Nn\l__sn_prefix_tl {}
 
-\seq_new:N \l__sn_shifts_seq
+% Dimensions for shifting
+\dim_new:N \l__sn_x_dim
+\dim_new:N \l__sn_y_dim
+\dim_new:N \l__sn_xa_dim
+\dim_new:N \l__sn_ya_dim
+\tl_new:N \l__sn_centre_tl
 
-%
-\file_if_exist:nT {\jobname.nodes}
-{
-  \file_input:n {\jobname.nodes}
-}
+\tl_new:N \l__sn_transformation_tl
+\tl_set:Nn \l__sn_transformation_tl {{1}{0}{0}{1}{0pt}{0pt}}
 
+% Set up a stream for saving the nodes data to a file
 \iow_new:N \g__sn_stream
 \iow_open:Nn \g__sn_stream {\jobname.nodes}
 
@@ -47,6 +45,12 @@
 {
   % Clear our token lists
   \tl_clear:N \l__sn_tmpa_tl
+  % Set the centre of the picture
+  \tikz_scan_point:NNn \l__sn_x_dim \l__sn_y_dim {(current~ bounding~ box.center)}
+  \dim_set:Nn \l__sn_x_dim {-\l__sn_x_dim}
+  \dim_set:Nn \l__sn_y_dim {-\l__sn_y_dim}
+  \tl_set:Nx \l__sn_centre_tl {{1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}}
+  
   % Iterate over the list of node names
   \clist_map_inline:nn {#2}
   {
@@ -55,7 +59,7 @@
     {
       % The node information is stored in a series of macros of the form
       % \pgf@sh@XX@nodename where XX is one of the following.
-      \clist_map_inline:nn {ns,np,ma,nt,pi}
+      \clist_map_inline:nn {ns,np,ma,pi}
       {
         % Our token list will look like:
         %
@@ -67,7 +71,7 @@
         % This part puts the \tl_set:cn {pgf@sh@XX@nodename} in place
         \tl_put_right:Nn \l__sn_tmpa_tl
         {
-          \tl_set:cn {pgf@sh@####1@\l__sn_prefix_tl ##1}
+          \tl_gset:cn {pgf@sh@####1@ \tikz_set_node_name:n{##1} }
         }
         % Now we put the current contents in place.  We're doing this in
         % an expansive context to get at the contents.  The \exp_not:v
@@ -75,12 +79,19 @@
         % it in place, preventing further expansion.
         \tl_if_exist:cTF {pgf@sh@####1@##1}
         {
-          \tl_put_right:Nx \l__sn_tmpa_tl {{\exp_not:v {pgf@sh@####1@\l__sn_prefix_tl ##1}}}
+          \tl_put_right:Nx \l__sn_tmpa_tl {{\exp_not:v {pgf@sh@####1@ \tikz_set_node_name:n {##1}}}}
         }
         {
           \tl_put_right:Nx \l__sn_tmpa_tl {{}}
         }
       }
+      \tl_put_right:Nn \l__sn_tmpa_tl
+      {
+        \tl_gset:cn {pgf@sh@nt@ \tikz_set_node_name:n{##1} }
+      }
+      \compose_transformations:NVv \l__sn_tmpb_tl \l__sn_centre_tl {pgf@sh@nt@##1}
+      \tl_put_right:Nx \l__sn_tmpa_tl {{\exp_not:V \l__sn_tmpb_tl}}
+      \tl_put_right:Nn \l__sn_tmpa_tl {\transform_node:Nn \l__sn_transformation_tl {\tikz_set_node_name:n{##1}} }
     }
   }
   % Once we've assembled our token list, we store it in the property
@@ -130,14 +141,21 @@
 }
 
 % The argument to this is the label for our group of nodes to restore.
-\DeclareDocumentCommand \RestoreNodes {o m}
+\DeclareDocumentCommand \RestoreNodes {O{} O{} m}
 {
-  \seq_clear:N \l__sn_shifts_seq
-  \IfNoValueF {#1} {
-    \keys_set:nn {save nodes} {#1}
-  }
-  \restore_nodes:n {#2}
+  \scope
+  \tikzset{#1}
+  \tikzset{#2}
+  \restore_nodes:n {#3}
+  \endscope
 }
+
+\makeatletter
+\DeclareDocumentCommand \RestoreAfterNode {m}
+{
+  \pgfkeysalso{append~ after~ command={\pgfextra{\RestoreNodes[transform~ nodes~ using=\tikz@last@fig@name]#1}}}
+}
+\makeatother
 
 \DeclareDocumentCommand \LoadNodesFrom {m}
 {
@@ -159,12 +177,24 @@
 }
 
 \makeatletter
+\cs_set_eq:NN \tikz_set_node_name:n \tikz@pp@name
+
 \cs_new_nopar:Npn \tikz_scan_point:n #1
 {
   \tikz@scan@one@point\pgfutil@firstofone#1\relax
 }
 
+\cs_new_nopar:Npn \tikz_scan_point:NNn #1#2#3
+{
+  \tikz@scan@one@point\pgfutil@firstofone#3\relax
+  \dim_set_eq:NN #1 \pgf@x
+  \dim_set_eq:NN #2 \pgf@y
+}
+
+\makeatother
+
 \cs_generate_variant:Nn \tikz_scan_point:n {V}
+\cs_generate_variant:Nn \tikz_scan_point:NNn {NNV}
 
 \cs_new_nopar:Npn \shift_node:nn #1#2
 {
@@ -177,33 +207,124 @@
     \tl_set:Nn \l__sn_tmpb_tl {#2}
   }
   
-  \tikz_scan_point:V \l__sn_tmpb_tl
+  \tikz_scan_point:NNV \l__sn_x_dim \l__sn_y_dim \l__sn_tmpb_tl
 
   \tl_if_eq:NNT \l__sn_tmpa_tl \l__sn_minus_tl {
-    \dim_set:Nn \pgf@x {-\pgf@x}
-    \dim_set:Nn \pgf@y {-\pgf@y}
+    \dim_set:Nn \l__sn_x_dim {- \l__sn_x_dim}
+    \dim_set:Nn \l__sn_y_dim {- \l__sn_y_dim}
+  }
+
+  \tl_set:Nx \l__sn_tmpa_tl
+  {
+    {1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}
   }
   
-  \tl_set:cx {pgf@sh@nt@#1}
+  \compose_transformations:cVv {pgf@sh@nt@#1} \l__sn_tmpa_tl {pgf@sh@nt@#1}
+}
+
+% Compose PGF transformations #2 * #3, storing the result in #1
+
+% I think the PGF Manual might be incorrect.  It implies that the
+% matrix is stored row-major, but experimentation implies column-major.
+%
+% That is, {a}{b}{c}{d}{s}{t} is:
+%
+% [ a c ]
+% [ b d ]
+
+\cs_new_nopar:Npn \compose_transformations:Nnn #1#2#3
+{
+  \tl_gset:Nx #1
   {
-    {\tl_item:cn {pgf@sh@nt@#1} {1}}
-    {\tl_item:cn {pgf@sh@nt@#1} {2}}
-    {\tl_item:cn {pgf@sh@nt@#1} {3}}
-    {\tl_item:cn {pgf@sh@nt@#1} {4}}
-    {\dim_eval:n {\tl_item:cn {pgf@sh@nt@#1} {5} + \pgf@x}}
-    {\dim_eval:n {\tl_item:cn {pgf@sh@nt@#1} {6} + \pgf@y}}
+    {\fp_eval:n {
+        \tl_item:nn {#2} {1}
+        * \tl_item:nn {#3} {1}
+        +
+        \tl_item:nn {#2} {3}
+        * \tl_item:nn {#3} {2}
+      }
+    }
+    {\fp_eval:n {
+        \tl_item:nn {#2} {2}
+        * \tl_item:nn {#3} {1}
+        +
+        \tl_item:nn {#2} {4}
+        * \tl_item:nn {#3} {2}
+      }
+    }
+    {\fp_eval:n {
+        \tl_item:nn {#2} {1}
+        * \tl_item:nn {#3} {3}
+        +
+        \tl_item:nn {#2} {3}
+        * \tl_item:nn {#3} {4}
+      }
+    }
+    {\fp_eval:n {
+        \tl_item:nn {#2} {2}
+        * \tl_item:nn {#3} {3}
+        +
+        \tl_item:nn {#2} {4}
+        * \tl_item:nn {#3} {4}
+      }
+    }
+    {\fp_to_dim:n {
+        \tl_item:nn {#2} {1}
+        * \tl_item:nn {#3} {5}
+        +
+        \tl_item:nn {#2} {3}
+        * \tl_item:nn {#3} {6}
+        +
+        \tl_item:nn {#2} {5}
+      }
+    }
+    {\fp_to_dim:n {
+        \tl_item:nn {#2} {2}
+        * \tl_item:nn {#3} {5}
+        +
+        \tl_item:nn {#2} {4}
+        * \tl_item:nn {#3} {6}
+        +
+        \tl_item:nn {#2} {6}
+      }
+    }
   }
 }
-\makeatother
+
+\cs_generate_variant:Nn \compose_transformations:Nnn {cVv,NVv,NVn,NvV,NnV}
+
+\cs_new_nopar:Npn \transform_node:Nn #1#2
+{
+  \compose_transformations:cVv {pgf@sh@nt@#2} #1 {pgf@sh@nt@#2}
+}
 
 \DeclareDocumentCommand \ShiftNode {m m}
 {
-  \clist_map_inline:nn {#2}
-  {
-    \shift_node:nn {#1}{##1}
-  }
+  \shift_node:nn {#1}{#2}
 }
 
+\tikzset{
+  transform~ nodes~ using/.code={
+    \tl_set_eq:Nc \l__sn_transformation_tl {pgf@sh@nt@#1}
+    \tikz_scan_point:NNn \l__sn_x_dim \l__sn_y_dim {(#1.center)}
+    
+    \dim_set:Nn \l__sn_x_dim {\l__sn_x_dim - \tl_item:cn {pgf@sh@nt@#1}{5}}
+    \dim_set:Nn \l__sn_y_dim {\l__sn_y_dim - \tl_item:cn {pgf@sh@nt@#1}{6}}
+    
+    \compose_transformations:NnV  \l__sn_transformation_tl {{1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}} \l__sn_transformation_tl
+
+    %% \tl_set:Nx \l__sn_transformation_tl
+    %% {
+    %%   {\tl_item:cn {pgf@sh@nt@#1} {1}}
+    %%   {\tl_item:cn {pgf@sh@nt@#1} {2}}
+    %%   {\tl_item:cn {pgf@sh@nt@#1} {3}}
+    %%   {\tl_item:cn {pgf@sh@nt@#1} {4}}
+    %%   {0pt}
+    %%   {0pt}
+    %% }
+    
+  }
+}
 
 \DeclareDocumentCommand \SaveNodesToFile {m m}
 {
@@ -211,10 +332,16 @@
   \save_nodes_to_file:n {#1}
 }
 
-\keys_define:nn {save nodes}
-{
-  prefix .tl_set:N  = \l__sn_prefix_tl,
-  prefix .initial:n = {},
-}
-
 \ExplSyntaxOff
+
+\makeatletter
+\tikzset{
+  restore nodes from/.code={
+    \tikz@fig@mustbenamed
+    \RestoreAfterNode{#1}
+  },
+  save nodes/.style 2 args={
+    execute at end picture={\SaveNodesToFile{#1}{#2}}
+  },
+}
+\makeatother
