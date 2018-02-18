@@ -11,11 +11,10 @@
 \documentclass[tikz,border=10pt]{standalone}
 \usetikzlibrary{savenodes,shapes.geometric}
 \begin{document}
-\begin{tikzpicture}
-\node[draw,rotate=-30](1) at (-2,0) {1};
+\begin{tikzpicture}[save nodes to file]
+\node[draw,rotate=-30,save node](1) at (-2,0) {1};
 \draw[->] (0,0) -- (1);
-\node[draw,ellipse] (c) at (current bounding box.center) {};
-\SaveNodesToFile{1}{1,c}
+\node[draw,ellipse,save node] (c) at (current bounding box.center) {};
 \end{tikzpicture}
 \end{document}
 \end{filecontents}
@@ -26,11 +25,10 @@
 \documentclass[tikz,border=10pt]{standalone}
 \usetikzlibrary{savenodes,shapes.geometric}
 \begin{document}
-\begin{tikzpicture}
-\node[draw,rotate=-70] (2) at (2,0) {2};
+\begin{tikzpicture}[save nodes to file]
+\node[draw,rotate=-70,save node] (2) at (2,0) {2};
 \draw[->] (0,0) -- (2);
-\node[draw,ellipse] (c) at (current bounding box.center) {};
-\SaveNodesToFile{2}{2,c}
+\node[draw,ellipse,save node] (c) at (current bounding box.center) {};
 \end{tikzpicture}
 \end{document}
 \end{filecontents}
@@ -40,41 +38,28 @@
 %\immediate\write18{lualatex \jobname-1.tex}
 %\immediate\write18{lualatex \jobname-2.tex}
 
-\LoadNodesFrom{\jobname-1}
-\LoadNodesFrom{\jobname-2}
-
 \begin{document}
 \begin{tikzpicture}
 
 \node[draw,
   rotate=30,
-  restore nodes from={[name prefix=pic-1-]{1}}
+  restore nodes from file={[name prefix=pic-1-]{\jobname-1}}
 ] (a-1) at (-2,-3) {\includegraphics{\jobname-1.pdf}};
 
 \node[draw,
   rotate=70,
-  restore nodes from={[name prefix=pic-2-]{2}}
+  restore nodes from file={[name prefix=pic-2-]{\jobname-2}}
 ] (a-2) at (+2,+2) {\includegraphics{\jobname-2.pdf}};
+
 \draw[red] (pic-1-1.north west) --  (pic-1-1.north east) --  (pic-1-1.south east) --  (pic-1-1.south west) -- cycle;
 \draw[red] (pic-2-2.north west) --  (pic-2-2.north east) --  (pic-2-2.south east) --  (pic-2-2.south west) -- cycle;
-
 
 \node[red] at (pic-1-1) {1};
 \node[red] at (pic-2-2) {2};
 
 \draw (a-1) circle[radius=5pt];
 \draw (a-2) circle[radius=5pt];
-\draw (a-1.origin) circle[radius=5pt];
-\draw (a-2.origin) circle[radius=5pt];
-\draw (0,0) circle[radius=5pt];
-%\draw (0,0) -- (pic-1-1.south west);
-%\draw (0,0) -- (pic-2-2.south west);
+
 \draw (pic-1-1) -- (pic-2-2);
-
-\fill[red] (-84.47409pt,-120.7466pt) circle[radius=3pt];
-\ShiftNode{a-1}{(1cm,2cm)}
-\draw[red] (a-1) circle[radius=5pt];
-\draw (a-1.center) -- +(-1,-2);
-
 \end{tikzpicture}
 \end{document}

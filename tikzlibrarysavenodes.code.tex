@@ -7,13 +7,16 @@
 % the ability to store several groups of nodes and restore them at
 % will.
 \prop_new:N \g__sn_prop
-% We'll need a token list for constructing the saved data.
+% We'll need a couple of spare token lists
 \tl_new:N \l__sn_tmpa_tl
-% And one for constructing the save file command
 \tl_new:N \l__sn_tmpb_tl
-% Testing a minus sign for shifting a node
-\tl_new:N \l__sn_minus_tl
-\tl_set:Nn \l__sn_minus_tl {-}
+
+\tl_new:N \l__open_bracket_tl
+\tl_set:Nn  \l__open_bracket_tl {[} %]
+\tl_new:N \l__sn_group_tl
+\clist_new:N \l__sn_nodes_clist
+
+\bool_new:N \l__sn_file_bool
 
 % Dimensions for shifting
 \dim_new:N \l__sn_x_dim
@@ -36,12 +39,35 @@
   \ExplSyntaxOff
 }
 
+% LaTeX3 wrappers around some PGF functions (to avoid @-catcode issues)
+\makeatletter
+\cs_set_eq:NN \tikz_set_node_name:n \tikz@pp@name
+\cs_set_eq:NN \tikz_fig_must_be_named: \tikz@fig@mustbenamed
+
+\cs_new_nopar:Npn \tikz_scan_point:n #1
+{
+  \tikz@scan@one@point\pgfutil@firstofone#1\relax
+}
+
+\cs_new_nopar:Npn \tikz_scan_point:NNn #1#2#3
+{
+  \tikz@scan@one@point\pgfutil@firstofone#3\relax
+  \dim_set_eq:NN #1 \pgf@x
+  \dim_set_eq:NN #2 \pgf@y
+}
+
+\makeatother
+
+\cs_generate_variant:Nn \tikz_scan_point:n {V}
+\cs_generate_variant:Nn \tikz_scan_point:NNn {NNV}
+
+
 % This is the command that actually does the work.  It constructs a
 % token list which contains the code that will restore the node data
-% when invoked.  The two arguments are the name of this group (for
-% reference later) and a comma separated list of the node names to be
-% saved.
-\cs_new_nopar:Npn \save_nodes:nn #1#2
+% when invoked.  The two arguments are the token list to store this in
+% and a comma separated list of the node names to be saved.
+
+\cs_new_nopar:Npn \save_nodes:Nn #1#2
 {
   % Clear our token lists
   \tl_clear:N \l__sn_tmpa_tl
@@ -94,12 +120,37 @@
       \tl_put_right:Nn \l__sn_tmpa_tl {\transform_node:Nn \l__sn_transformation_tl {\tikz_set_node_name:n{##1}} }
     }
   }
-  % Once we've assembled our token list, we store it in the property
-  % list using the key we were given.
+  % Once we've assembled our token list, we store it in the given
+  % token list
+  \tl_set_eq:NN #1 \l__sn_tmpa_tl
+}
+
+% Save the nodes to a list, given a key
+\cs_new_nopar:Npn \save_nodes_to_list:nn #1#2
+{
+  \save_nodes:Nn \l__sn_tmpa_tl {#2}
   \prop_gput:NnV \g__sn_prop {#1} \l__sn_tmpa_tl
 }
 
-\cs_new_nopar:Npn \restore_nodes:n #1
+% Save the nodes to a file
+\cs_new_nopar:Npn \save_nodes_to_file:n #1
+{
+  \save_nodes:Nn \l__sn_tmpa_tl {#1}
+  % Save the token list to the aux file so that on reading the aux
+  % file, we restore the node definitions
+  \iow_now:Nx \g__sn_stream
+  {
+    \iow_newline:
+    \exp_not:V \l__sn_tmpa_tl
+    \iow_newline:
+  }
+}
+
+\cs_generate_variant:Nn \save_nodes_to_list:nn {VV}
+
+\cs_generate_variant:Nn \save_nodes_to_file:n {V}
+
+\cs_new_nopar:Npn \restore_nodes_from_list:n #1
 {
   % Restoring nodes is simple: look in the property list for the key
   % and if it exists, invoke the macro stored there.
@@ -109,55 +160,7 @@
   }
 }
 
-\cs_new_nopar:Npn \save_nodes_to_file:n #1
-{
-  % Save the token list to the aux file so that on reading the aux
-  % file, we restore it to the prop
-  \prop_get:NnNT \g__sn_prop {#1} \l__sn_tmpa_tl
-  {
-    \tl_clear:N \l__sn_tmpb_tl
-    \tl_set:Nn \l__sn_tmpb_tl
-    {
-      \prop_gput:Nnn \g__sn_prop {#1}
-    }
-    \tl_put_right:Nx \l__sn_tmpb_tl {{\exp_not:V \l__sn_tmpa_tl}}
-    \iow_now:Nx \g__sn_stream
-    {
-      \iow_newline:
-      \exp_not:V \l__sn_tmpb_tl
-      \iow_newline:
-    }
-  }
-}
-
-% These two are wrappers around our internal commands.
-%
-% The first argument is the label for our group of nodes (so that we
-% can refer to them later) and the second argument is a comma
-% separated list of nodes to save.
-\DeclareDocumentCommand \SaveNodes {m m}
-{
-  \save_nodes:nn {#1}{#2}
-}
-
-% The argument to this is the label for our group of nodes to restore.
-\DeclareDocumentCommand \RestoreNodes {O{} O{} m}
-{
-  \scope
-  \tikzset{#1}
-  \tikzset{#2}
-  \restore_nodes:n {#3}
-  \endscope
-}
-
-\makeatletter
-\DeclareDocumentCommand \RestoreAfterNode {m}
-{
-  \pgfkeysalso{append~ after~ command={\pgfextra{\RestoreNodes[transform~ nodes~ using=\tikz@last@fig@name]#1}}}
-}
-\makeatother
-
-\DeclareDocumentCommand \LoadNodesFrom {m}
+\cs_new_nopar:Npn \restore_nodes_from_file:n #1
 {
   \file_if_exist:nT {#1.nodes}
   {
@@ -165,61 +168,6 @@
     \file_input:n {#1.nodes}
     \ExplSyntaxOff
   }
-}
-
-\DeclareDocumentCommand \BakeBoundingBoxAs {m}
-{
-  \tl_set:cn {pgf@sh@ns@#1}{rectangle}
-  \tl_set:cx {pgf@sh@np@#1}{\def \exp_not:N \northeast {\exp_not:N \pgfqpoint{ \dim_use:N \pgf@picmaxx} {\dim_use:N \pgf@picmaxy}} \def \exp_not:N \southwest {\exp_not:N \pgfqpoint {\dim_use:N \pgf@picminx} {\dim_use:N \pgf@picminy}}}
-  \tl_set:cn {pgf@sh@ma@#1}{}
-  \tl_set:cn {pgf@sh@nt@#1}{{1}{0}{0}{1}{0pt}{0pt}}
-  \tl_set:cx {pgf@sh@pi@#1}{\tl_use:N \pgfpictureid}
-}
-
-\makeatletter
-\cs_set_eq:NN \tikz_set_node_name:n \tikz@pp@name
-
-\cs_new_nopar:Npn \tikz_scan_point:n #1
-{
-  \tikz@scan@one@point\pgfutil@firstofone#1\relax
-}
-
-\cs_new_nopar:Npn \tikz_scan_point:NNn #1#2#3
-{
-  \tikz@scan@one@point\pgfutil@firstofone#3\relax
-  \dim_set_eq:NN #1 \pgf@x
-  \dim_set_eq:NN #2 \pgf@y
-}
-
-\makeatother
-
-\cs_generate_variant:Nn \tikz_scan_point:n {V}
-\cs_generate_variant:Nn \tikz_scan_point:NNn {NNV}
-
-\cs_new_nopar:Npn \shift_node:nn #1#2
-{
-  \tl_set:Nx \l__sn_tmpa_tl {\tl_head:N {#2}}
-  
-  \tl_if_eq:NNTF \l__sn_tmpa_tl \l__sn_minus_tl {
-    \tl_set:Nx \l__sn_tmpb_tl {\tl_tail:n {#2}}
-  }
-  {
-    \tl_set:Nn \l__sn_tmpb_tl {#2}
-  }
-  
-  \tikz_scan_point:NNV \l__sn_x_dim \l__sn_y_dim \l__sn_tmpb_tl
-
-  \tl_if_eq:NNT \l__sn_tmpa_tl \l__sn_minus_tl {
-    \dim_set:Nn \l__sn_x_dim {- \l__sn_x_dim}
-    \dim_set:Nn \l__sn_y_dim {- \l__sn_y_dim}
-  }
-
-  \tl_set:Nx \l__sn_tmpa_tl
-  {
-    {1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}
-  }
-  
-  \compose_transformations:cVv {pgf@sh@nt@#1} \l__sn_tmpa_tl {pgf@sh@nt@#1}
 }
 
 % Compose PGF transformations #2 * #3, storing the result in #1
@@ -298,50 +246,116 @@
   \compose_transformations:cVv {pgf@sh@nt@#2} #1 {pgf@sh@nt@#2}
 }
 
-\DeclareDocumentCommand \ShiftNode {m m}
+\cs_new_nopar:Npn \set_transform_from_node:n #1
 {
-  \shift_node:nn {#1}{#2}
+  \tl_set_eq:Nc \l__sn_transformation_tl {pgf@sh@nt@#1}
+  \tikz_scan_point:NNn \l__sn_x_dim \l__sn_y_dim {(#1.center)}
+    
+  \dim_set:Nn \l__sn_x_dim {\l__sn_x_dim - \tl_item:cn {pgf@sh@nt@#1}{5}}
+  \dim_set:Nn \l__sn_y_dim {\l__sn_y_dim - \tl_item:cn {pgf@sh@nt@#1}{6}}
+    
+  \compose_transformations:NnV  \l__sn_transformation_tl {{1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}} \l__sn_transformation_tl
 }
 
-\tikzset{
-  transform~ nodes~ using/.code={
-    \tl_set_eq:Nc \l__sn_transformation_tl {pgf@sh@nt@#1}
-    \tikz_scan_point:NNn \l__sn_x_dim \l__sn_y_dim {(#1.center)}
-    
-    \dim_set:Nn \l__sn_x_dim {\l__sn_x_dim - \tl_item:cn {pgf@sh@nt@#1}{5}}
-    \dim_set:Nn \l__sn_y_dim {\l__sn_y_dim - \tl_item:cn {pgf@sh@nt@#1}{6}}
-    
-    \compose_transformations:NnV  \l__sn_transformation_tl {{1}{0}{0}{1}{\dim_use:N \l__sn_x_dim}{\dim_use:N \l__sn_y_dim}} \l__sn_transformation_tl
+\cs_generate_variant:Nn \set_transform_from_node:n {v}
 
-    %% \tl_set:Nx \l__sn_transformation_tl
-    %% {
-    %%   {\tl_item:cn {pgf@sh@nt@#1} {1}}
-    %%   {\tl_item:cn {pgf@sh@nt@#1} {2}}
-    %%   {\tl_item:cn {pgf@sh@nt@#1} {3}}
-    %%   {\tl_item:cn {pgf@sh@nt@#1} {4}}
-    %%   {0pt}
-    %%   {0pt}
-    %% }
-    
+\tikzset{
+  set~ node~ group/.code={
+    \tl_set:Nn \l__sn_group_tl {#1}
+    \pgfkeysalso{
+      execute~ at~ end~ scope={
+        \maybe_save_nodes:
+      }
+    }
+  },
+  % Are we saving to a file?
+  save~ nodes~ to~ file/.code={
+    \tl_if_eq:nnTF {#1}{false}
+    {
+      \bool_set_false:N \l__sn_file_bool
+    }
+    {
+      \bool_set_true:N \l__sn_file_bool
+    }
+    \pgfkeysalso{
+      execute~ at~ end~ scope={
+        \maybe_save_nodes:
+      }
+    }
+  },
+  % Append current node to the list of nodes to be saved
+  save~ node/.code={
+    \tikz_fig_must_be_named:
+    \pgfkeysalso{append~ after~ command={
+        \pgfextra{
+          \clist_gput_right:Nv \l__sn_nodes_clist {tikz@last@fig@name}
+        }
+      }
+    }
+  },
+  % Restore nodes from file
+  restore~ nodes~ from~ file/.code={
+    \tikz_fig_must_be_named:
+    \pgfkeysalso{append~ after~ command={
+        \pgfextra{
+          \scope
+          \set_transform_from_node:v {tikz@last@fig@name}
+          \split_argument:NNn \tikzset \restore_nodes_from_file:n {#1}
+          \endscope
+        }
+      }
+    }
+  },
+  % Restore nodes from list
+  restore~ nodes~ from~ list/.code={
+    \tikz_fig_must_be_named:
+    \pgfkeysalso{append~ after~ command={
+        \pgfextra{
+          \scope
+          \set_transform_from_node:v {tikz@last@fig@name}
+          \split_argument:NNn \tikzset \restore_nodes_from_list:n {#1}
+          \endscope
+        }
+      }
+    }
+  }
+}
+\cs_generate_variant:Nn \clist_gput_right:Nn {Nv}
+
+\cs_new_nopar:Npn \split_argument:NNn #1#2#3
+{
+  \tl_set:Nx \l__sn_tmpa_tl {\tl_head:n {#3}}
+  \tl_if_eq:NNTF \l__sn_tmpa_tl \l__open_bracket_tl
+  {
+    \split_argument_aux:NNp #1#2#3
+  }
+  {
+    #2 {#3}
   }
 }
 
-\DeclareDocumentCommand \SaveNodesToFile {m m}
+\cs_new_nopar:Npn \split_argument_aux:NNp #1#2[#3]#4
 {
-  \save_nodes:nn {#1}{#2}
-  \save_nodes_to_file:n {#1}
+  #1 {#3}
+  #2 {#4}
+}
+
+\cs_new_nopar:Npn \maybe_save_nodes:
+{
+  \clist_if_empty:NF \l__sn_nodes_clist
+  {
+    \bool_if:NTF \l__sn_file_bool
+    {
+      \save_nodes_to_file:V \l__sn_nodes_clist
+    }
+    {
+      \tl_if_empty:NF \l__sn_group_tl
+      {
+        \save_nodes_to_list:VV \l__sn_group_tl \l__sn_nodes_clist
+      }
+    }
+    \clist_gclear:N \l__sn_nodes_clist
+  }
 }
 
 \ExplSyntaxOff
-
-\makeatletter
-\tikzset{
-  restore nodes from/.code={
-    \tikz@fig@mustbenamed
-    \RestoreAfterNode{#1}
-  },
-  save nodes/.style 2 args={
-    execute at end picture={\SaveNodesToFile{#1}{#2}}
-  },
-}
-\makeatother
